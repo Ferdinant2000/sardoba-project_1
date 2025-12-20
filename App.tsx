@@ -9,7 +9,7 @@ import Clients from './components/Clients';
 import Settings from './components/Settings';
 import Login from './components/Login';
 import Profile from './components/Profile';
-import { Product, Client, Order, CartItem, AppSettings, User, StockMovement, UserRole, OrderItem } from './types';
+import { Product, Client, Order, CartItem, AppSettings, User, StockMovement, UserRole } from './types';
 import { supabase } from './supabaseClient';
 import { Loader2 } from 'lucide-react';
 
@@ -49,6 +49,7 @@ const App: React.FC = () => {
   }, []);
 
   // Fetch Data from Supabase
+
   const fetchData = async () => {
     if (!user) {
       setLoading(false);

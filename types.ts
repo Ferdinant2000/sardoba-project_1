@@ -7,8 +7,8 @@ export enum UserRole {
 }
 
 export interface User {
-  id: string;
-  telegramId: number;
+  id: string; // UUID
+  telegramId: number; // BigInt in DB, number in JS (safe up to 2^53)
   name: string;
   role: UserRole;
   avatarUrl?: string;
