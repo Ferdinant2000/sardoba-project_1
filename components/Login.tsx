@@ -44,20 +44,39 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setIsLoading(true);
     setError('');
 
+    console.log('--- LOGIN ATTEMPT ---');
+    console.log('Telegram User Data:', telegramUser);
+
     try {
       // 1. Check if user exists in 'users' table by telegram_id
+      // We accept both string/number so we make sure we search effectively.
+      // Database is likely BigInt, which returns as number in JS if small enough or string.
+      // We just use whatever we got, but we can verify.
+
       const { data: existingUser, error: fetchError } = await supabase
         .from('users')
         .select('*')
         .eq('telegram_id', telegramUser.id)
-        .single();
+        .maybeSingle();
 
-      if (fetchError || !existingUser) {
+      console.log('Fetch Result:', { existingUser, fetchError });
+
+      if (fetchError) {
+        console.error('Supabase Fetch Error:', fetchError);
+        setError('Database Connection Error. Checks logs.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (!existingUser) {
+        console.warn('User NOT found in DB for ID:', telegramUser.id);
         // If not found, deny access
         setError(`Access Denied: Your Telegram ID (${telegramUser.id}) is not registered. Please contact the administrator.`);
         setIsLoading(false);
         return;
       }
+
+      console.log('User found, syncing profile...');
 
       // 2. Update user profile in DB with latest Telegram info (sync)
       // Only update if data has changed to save writes, or just update always for simplicity
@@ -76,6 +95,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       if (updateError) {
         console.error('Failed to sync profile', updateError);
+      } else {
+        console.log('Profile synced successfully:', updatedUser);
       }
 
       const finalUser = updatedUser || existingUser;
@@ -90,19 +111,18 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         username: finalUser.username
       };
 
+      console.log('Logging in user:', user);
+
       // 4. Log User In
       onLogin(user);
 
     } catch (err) {
-      console.error(err);
+      console.error('Unexpected Login Error:', err);
       setError('Connection error occurred. Please try again.');
     } finally {
       if (!isAutoLogin) {
         // Keep loading true if auto-login to prevent flash, but here we stop it if manual
         setIsLoading(false);
-      } else {
-        // If error, stop loading to show it. If success, parent will unmount Login.
-        // But we can verify if we set it false on error above.
       }
     }
   };
