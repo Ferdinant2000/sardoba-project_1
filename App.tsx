@@ -18,6 +18,10 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Environment State
+  const [isTelegram, setIsTelegram] = useState(false);
+  const [isDevBypass, setIsDevBypass] = useState(false);
+
   // Central State Management
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -32,24 +36,38 @@ const App: React.FC = () => {
     defaultMinStock: 5
   });
 
-  // Check for saved user session
+  // INITIALIZATION LOGIC
   useEffect(() => {
-    const savedUser = localStorage.getItem('nexus_user');
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (e) {
-        console.error("Failed to parse user session");
-        localStorage.removeItem('nexus_user');
+    // 1. Detect if running inside Telegram
+    // initData is only present if opened via Telegram
+    const tg = window.Telegram?.WebApp;
+    const isTgEnv = !!tg?.initData;
+    setIsTelegram(isTgEnv);
+
+    // 2. Handle Session based on Environment
+    if (!isTgEnv) {
+      // BROWSER MODE:
+      // By default, ignore cached session to show Landing Page.
+      // We only allow session if isDevBypass is set (handled by Login component callback)
+      // But initially, we just stop loading so the Router can show Login.
+      setLoading(false);
+    } else {
+      // TELEGRAM MODE:
+      // Try to restore session or show Login (which will auto-auth)
+      const savedUser = localStorage.getItem('nexus_user');
+      if (savedUser) {
+        try {
+          setUser(JSON.parse(savedUser));
+        } catch (e) {
+          console.error("Failed to parse user session");
+          localStorage.removeItem('nexus_user');
+        }
       }
+      setLoading(false);
     }
-    // We initially set loading to false after checking local storage, 
-    // but fetchData will start its own loading state if user exists.
-    if (!savedUser) setLoading(false);
   }, []);
 
   // Fetch Data from Supabase
-
   const fetchData = async () => {
     if (!user) {
       setLoading(false);
@@ -174,11 +192,20 @@ const App: React.FC = () => {
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
     localStorage.setItem('nexus_user', JSON.stringify(loggedInUser));
+
+    // If logging in explicitly (Dev/Simulate), enable bypass
+    if (!isTelegram) {
+      setIsDevBypass(true);
+    }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setUser(null);
     localStorage.removeItem('nexus_user');
+    await supabase.auth.signOut();
+
+    // Force reload to clear all state and re-check environment
+    window.location.reload();
   };
 
   // Helper: Log Movement
@@ -384,6 +411,22 @@ const App: React.FC = () => {
     );
   }
 
+  // CORE ROUTING LOGIC
+
+  // Rule 1: Not in Telegram AND Not Dev Bypass -> Show Login (Landing Page)
+  if (!isTelegram && !isDevBypass) {
+    return (
+      <Router>
+        <Routes>
+          {/* All routes redirect to Login in strict browser mode, except Login itself */}
+          <Route path="/login" element={<Login onLogin={handleLogin} />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Router>
+    );
+  }
+
+  // Rule 2: In Telegram or Dev Mode -> Use User Session
   return (
     <Router>
       <Routes>

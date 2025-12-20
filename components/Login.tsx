@@ -2,229 +2,192 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { supabase } from '../supabaseClient';
-import { Loader2, AlertCircle, Shield, ExternalLink, Smartphone, Terminal } from 'lucide-react';
+import { Loader2, ShoppingBag, ShieldAlert, Send } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (user: User) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [status, setStatus] = useState<'loading' | 'error' | 'idle'>('loading');
+  const [errorMessage, setErrorMessage] = useState('');
   const [isTelegramEnv, setIsTelegramEnv] = useState(false);
 
-  // Dev State
-  const [showDevLogin, setShowDevLogin] = useState(false);
-  const [devInputId, setDevInputId] = useState('');
+  // Dev State for "Developer Access" footer
+  const [showDevInput, setShowDevInput] = useState(false);
+  const [devInput, setDevInput] = useState('6062118302');
 
-  // 1. Auto-Detect Telegram Environment
-  useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-
-    // Check if we are truly inside Telegram (valid user data present)
-    if (tg?.initDataUnsafe?.user) {
-      setIsTelegramEnv(true);
-      tg.ready();
-      tg.expand();
-
-      const user = tg.initDataUnsafe.user;
-
-      // Auto-login attempt
-      handleAuth({
-        id: user.id,
-        first_name: user.first_name,
-        username: user.username,
-        photo_url: user.photo_url
-      }, true);
-    }
-  }, []);
-
-  // 2. Robust Auth Logic
-  const handleAuth = async (
-    telegramUser: { id: number; first_name: string; username?: string; photo_url?: string },
-    isAutoLogin: boolean = false
-  ) => {
-    setIsLoading(true);
-    setError('');
-
-    // Ensure we are working with a number
-    const searchId = Number(telegramUser.id);
-    console.log('--- AUTH ATTEMPT ---', searchId);
-
+  const executeLogin = async (telegramUser: any) => {
+    setStatus('loading');
     try {
-      // Diagnostic: Check if DB is reachable
-      const { count, error: countError } = await supabase.from('users').select('*', { count: 'exact', head: true });
-      if (countError) throw new Error("DB Connection Failed");
+      const searchId = Number(telegramUser.id);
 
-      // Query User
-      const { data: existingUser, error: fetchError } = await supabase
+      // Check DB
+      const { data: userData, error } = await supabase
         .from('users')
         .select('*')
         .eq('telegram_id', searchId)
         .maybeSingle();
 
-      if (fetchError) throw fetchError;
+      if (error) throw error;
 
-      if (!existingUser) {
-        setError(`Access Denied. User ID ${searchId} is not registered.`);
-        setIsLoading(false);
+      if (!userData) {
+        setErrorMessage(`ID ${searchId} not authorized.`);
+        setStatus('error');
         return;
       }
 
-      // Sync Profile (Avatar/Name)
-      const updates = {
+      // Sync Profile
+      await supabase.from('users').update({
         name: telegramUser.first_name,
         username: telegramUser.username,
-        avatar_url: telegramUser.photo_url,
-      };
+        avatar_url: telegramUser.photo_url
+      }).eq('id', userData.id);
 
-      const { data: updatedUser } = await supabase
-        .from('users')
-        .update(updates)
-        .eq('id', existingUser.id)
-        .select()
-        .single();
-
-      const finalUser = updatedUser || existingUser;
-
-      // Construct User Object
+      // Success
       const user: User = {
-        id: finalUser.id,
-        telegramId: finalUser.telegram_id,
-        name: finalUser.name,
-        role: finalUser.role as UserRole,
-        avatarUrl: finalUser.avatar_url,
-        username: finalUser.username
+        id: userData.id,
+        telegramId: userData.telegram_id,
+        name: userData.name,
+        role: userData.role as UserRole,
+        avatarUrl: userData.avatar_url,
+        username: userData.username
       };
-
       onLogin(user);
 
-    } catch (err: any) {
-      console.error('Auth Error:', err);
-      setError(err.message || 'Authentication Failed');
-      setIsLoading(false);
+    } catch (e: any) {
+      console.error(e);
+      setErrorMessage("Connection Error. Please try again.");
+      setStatus('error');
     }
   };
 
-  const handleDevSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!devInputId) return;
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    if (tg?.initDataUnsafe?.user) {
+      setIsTelegramEnv(true);
+      tg.ready();
+      tg.expand();
+      executeLogin(tg.initDataUnsafe.user);
+    } else {
+      setIsTelegramEnv(false);
+      setStatus('idle');
+    }
+  }, []);
 
-    // Simulate Telegram User
-    handleAuth({
-      id: parseInt(devInputId),
-      first_name: `DevUser_${devInputId}`,
-      username: 'dev_sim',
-      photo_url: undefined
+  const handleDevLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    executeLogin({
+      id: Number(devInput),
+      first_name: 'Dev User',
+      username: 'developer'
     });
   };
 
-  // --- RENDER: SCENARIO A (Telegram Environment) ---
+  // SCENARIO 1: INSIDE TELEGRAM (Minimalist Loader)
   if (isTelegramEnv) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-        <div className="text-center w-full max-w-sm">
-          {error ? (
-            <div className="bg-white p-6 rounded-2xl shadow-xl border border-red-100 animate-in fade-in zoom-in duration-300">
-              <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
-              <h3 className="text-lg font-bold text-slate-800 mb-2">Access Denied</h3>
-              <p className="text-sm text-slate-500 mb-6">{error}</p>
-              <button onClick={() => window.location.reload()} className="w-full py-3 bg-slate-100 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 transition-colors">
-                Try Again
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center animate-in fade-in duration-700">
-              <div className="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 mb-8 animate-pulse">
-                <Shield className="text-white" size={40} />
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Nexus B2B</h2>
-              <p className="text-slate-500 font-medium text-sm mb-8">Securely logging you in...</p>
-              <Loader2 size={32} className="text-blue-500 animate-spin" />
-            </div>
-          )}
+    if (status === 'error') {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+          <div className="bg-white p-8 rounded-2xl shadow-lg max-w-sm w-full border border-red-100">
+            <ShieldAlert size={48} className="text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Access Restricted</h2>
+            <p className="text-slate-500 text-sm mb-6">{errorMessage}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+        <Loader2 size={40} className="text-blue-600 animate-spin mb-4" />
+        <p className="text-slate-500 font-medium animate-pulse">Verifying profile...</p>
       </div>
     );
   }
 
-  // --- RENDER: SCENARIO B (Browser / Landing) ---
+  // SCENARIO 2: BROWSER LANDING PAGE (Clean & Professional)
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center relative">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
 
-      {showDevLogin ? (
-        // Dev Backdoor View
-        <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl animate-in fade-in slide-in-from-bottom-10">
-          <div className="flex items-center justify-center mb-6">
-            <Terminal className="text-slate-800 mr-2" size={24} />
-            <h2 className="text-xl font-bold text-slate-800">Dev Login Simulator</h2>
+      {/* Main Card */}
+      <div className="bg-white w-full max-w-md rounded-3xl shadow-xl overflow-hidden animate-in fade-in zoom-in duration-500">
+        <div className="p-8 pb-6 text-center">
+          {/* Icon */}
+          <div className="mx-auto w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6">
+            <ShoppingBag size={32} className="text-blue-600" />
           </div>
-          <form onSubmit={handleDevSubmit} className="space-y-4">
-            <div className="text-left">
-              <label className="text-xs font-bold text-slate-500 uppercase">Simulate Telegram ID</label>
+
+          {/* Title */}
+          <h1 className="text-3xl font-bold text-slate-900 mb-3 tracking-tight">
+            Nexus Inventory
+          </h1>
+
+          {/* Description */}
+          <p className="text-slate-500 leading-relaxed mb-6">
+            To access the secured inventory, please open this application inside our Telegram Bot.
+          </p>
+
+          {/* QR Code */}
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 inline-block mb-6">
+            <img
+              src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://t.me/sardoba_project_bot"
+              alt="Bot QR Code"
+              className="w-40 h-40 mix-blend-multiply opacity-90 rounded-lg"
+            />
+          </div>
+
+          {/* Main Action Button */}
+          <a
+            href="https://t.me/sardoba_project_bot"
+            target="_blank"
+            rel="noreferrer"
+            className="block w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-blue-200 transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center"
+          >
+            <Send size={20} className="mr-2" />
+            Open Telegram Bot
+          </a>
+        </div>
+
+        {/* Footer / Dev Access */}
+        <div className="bg-gray-50 p-4 border-t border-gray-100 text-center">
+          {!showDevInput ? (
+            <button
+              onClick={() => setShowDevInput(true)}
+              className="text-xs font-semibold text-gray-400 hover:text-gray-600 uppercase tracking-widest transition-colors"
+            >
+              Developer Access
+            </button>
+          ) : (
+            <form onSubmit={handleDevLogin} className="flex gap-2 animate-in slide-in-from-bottom-2">
               <input
                 type="number"
-                value={devInputId}
-                onChange={(e) => setDevInputId(e.target.value)}
-                className="w-full mt-1 p-3 border border-slate-200 rounded-xl bg-slate-50 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="e.g. 6062118302"
+                className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="Enter Test ID"
+                value={devInput}
+                onChange={(e) => setDevInput(e.target.value)}
                 autoFocus
               />
-            </div>
-            {error && <p className="text-red-500 text-sm font-medium">{error}</p>}
-            <button type="submit" disabled={isLoading} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors flex justify-center items-center">
-              {isLoading ? <Loader2 className="animate-spin" /> : 'Log In'}
-            </button>
-            <button type="button" onClick={() => setShowDevLogin(false)} className="text-slate-400 text-sm hover:text-slate-600">
-              Cancel
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-black transition-colors"
+              >
+                Go
+              </button>
+            </form>
+          )}
         </div>
-      ) : (
-        // Normal Landing View
-        <div className="max-w-md w-full animate-in fade-in duration-700">
-          <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
-            <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 mx-auto mb-6">
-              <Shield className="text-white" size={32} />
-            </div>
+      </div>
 
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">Nexus B2B Inventory</h1>
-            <p className="text-slate-500 mb-8 leading-relaxed">
-              This application is designed to provide a secure, native experience inside Telegram.
-            </p>
-
-            {/* QR Code */}
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 inline-block mb-8">
-              <img
-                src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://t.me/sardoba_project_bot"
-                alt="Telegram Bot QR"
-                className="w-40 h-40 mix-blend-multiply opacity-90 rounded-lg"
-              />
-            </div>
-
-            <a
-              href="https://t.me/sardoba_project_bot"
-              target="_blank"
-              rel="noreferrer"
-              className="block w-full py-4 bg-[#229ED9] hover:bg-[#1E8BBF] text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-[#229ED9]/30 transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center group"
-            >
-              <Smartphone className="mr-3 group-hover:animate-pulse" size={20} />
-              Open @sardoba_project_bot
-            </a>
-          </div>
-
-          {/* Dev Backdoor Trigger */}
-          <div className="mt-8">
-            <button
-              onClick={() => setShowDevLogin(true)}
-              className="text-xs text-slate-300 font-mono hover:text-slate-400 transition-colors flex items-center justify-center mx-auto"
-            >
-              <Terminal size={12} className="mr-1" />
-              Dev Login (Simulate)
-            </button>
-          </div>
-        </div>
-      )}
+      <p className="mt-8 text-xs text-center text-gray-400">
+        &copy; 2025 Nexus B2B. All rights reserved.
+      </p>
     </div>
   );
 };
