@@ -1,0 +1,7 @@
+{
+  "name": "Nexus B2B Inventory",
+  "description": "A comprehensive B2B inventory management and point-of-sale system featuring real-time stock tracking, client management, and financial analytics.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
