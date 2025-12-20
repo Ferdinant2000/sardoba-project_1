@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { supabase } from '../supabaseClient';
 import { Send, Loader2, AlertCircle, Shield, Users, Eye } from 'lucide-react';
@@ -12,9 +12,35 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [telegramIdInput, setTelegramIdInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isTelegramEnv, setIsTelegramEnv] = useState(false);
 
-  // This function mimics the logic you'd use with the real Telegram Widget
-  const handleAuth = async (telegramUser: { id: number; first_name: string; username?: string; photo_url?: string }) => {
+  // Auto-Detect Telegram Environment
+  useEffect(() => {
+    // Check if running inside Telegram
+    const tg = window.Telegram?.WebApp;
+
+    if (tg?.initDataUnsafe?.user) {
+      setIsTelegramEnv(true);
+      tg.ready();
+      tg.expand();
+
+      const user = tg.initDataUnsafe.user;
+
+      // Attempt auto-login with Telegram data
+      handleAuth({
+        id: user.id,
+        first_name: user.first_name,
+        username: user.username,
+        photo_url: user.photo_url
+      }, true); // Pass 'true' to indicate auto-login
+    }
+  }, []);
+
+  // Shared Auth Logic
+  const handleAuth = async (
+    telegramUser: { id: number; first_name: string; username?: string; photo_url?: string },
+    isAutoLogin: boolean = false
+  ) => {
     setIsLoading(true);
     setError('');
 
@@ -27,17 +53,18 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         .single();
 
       if (fetchError || !existingUser) {
-        setError('Access Denied: Contact Developer. Your Telegram ID is not registered.');
+        // If not found, deny access
+        setError(`Access Denied: Your Telegram ID (${telegramUser.id}) is not registered. Please contact the administrator.`);
         setIsLoading(false);
         return;
       }
 
-      // 2. Update user profile in DB with latest Telegram info
+      // 2. Update user profile in DB with latest Telegram info (sync)
+      // Only update if data has changed to save writes, or just update always for simplicity
       const updates = {
         name: telegramUser.first_name,
         username: telegramUser.username,
         avatar_url: telegramUser.photo_url,
-        // Role is NOT updated here; it's managed by Admin
       };
 
       const { data: updatedUser, error: updateError } = await supabase
@@ -49,7 +76,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       if (updateError) {
         console.error('Failed to sync profile', updateError);
-        // We continue even if sync fails, using the existing data
       }
 
       const finalUser = updatedUser || existingUser;
@@ -71,7 +97,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       console.error(err);
       setError('Connection error occurred. Please try again.');
     } finally {
-      setIsLoading(false);
+      if (!isAutoLogin) {
+        // Keep loading true if auto-login to prevent flash, but here we stop it if manual
+        setIsLoading(false);
+      } else {
+        // If error, stop loading to show it. If success, parent will unmount Login.
+        // But we can verify if we set it false on error above.
+      }
     }
   };
 
@@ -113,6 +145,36 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     onLogin(guestUser);
   };
 
+  // SCENARIO 1: Running inside Telegram (Auto-Auth View)
+  if (isTelegramEnv) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+        <div className="text-center">
+          {error ? (
+            <div className="bg-red-50 p-6 rounded-2xl border border-red-100 max-w-xs mx-auto shadow-lg animate-in fade-in zoom-in duration-300">
+              <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
+              <h3 className="text-lg font-bold text-red-700 mb-2">Authentication Failed</h3>
+              <p className="text-sm text-red-600">{error}</p>
+              <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-bold hover:bg-red-200 transition-colors">
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center animate-in fade-in duration-700">
+              <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 mb-6 animate-pulse">
+                <Shield className="text-white" size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-slate-800">Nexus B2B</h2>
+              <p className="text-slate-500 text-sm mt-1 mb-6">Verifying secure access...</p>
+              <Loader2 size={32} className="text-blue-500 animate-spin" />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // SCENARIO 2: Browser / Dev Environment
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
@@ -126,8 +188,11 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         <div className="p-8">
           <div className="mb-6 text-center text-slate-600">
-            <h2 className="text-lg font-semibold text-slate-800">Authentication</h2>
-            <p className="text-sm mt-1">Simulate Telegram Login for Development</p>
+            <div className="inline-flex items-center px-3 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-bold mb-2">
+              BROWSER MODE - DEV ONLY
+            </div>
+            <h2 className="text-lg font-semibold text-slate-800">Manual Login</h2>
+            <p className="text-sm mt-1">Simulate access for development & testing.</p>
           </div>
 
           <form onSubmit={handleSimulateLogin} className="space-y-5">
