@@ -1,0 +1,15 @@
+{
+    "css.lint.unknownAtRules": "ignore",
+    "scss.lint.unknownAtRules": "ignore",
+    "less.lint.unknownAtRules": "ignore",
+    "deno.enable": true,
+    "deno.enablePaths": [
+        "supabase",
+        "supabase/functions"
+    ],
+    "deno.unstable": true,
+    "deno.lint": true,
+    "[typescript]": {
+        "editor.defaultFormatter": "denoland.vscode-deno"
+    }
+}

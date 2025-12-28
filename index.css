@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@layer base {
+    :root {
+        /* Light Mode Semantic Tokens */
+        --bg-primary: 248 250 252;
+        /* slate-50 */
+        --bg-secondary: 255 255 255;
+        /* white */
+        --text-primary: 15 23 42;
+        /* slate-900 */
+        --text-secondary: 100 116 139;
+        /* slate-500 */
+        --border-color: 226 232 240;
+        /* slate-200 */
+        --accent-color: 37 99 235;
+        /* blue-600 */
+    }
+
+    .dark {
+        /* Dark Mode Semantic Tokens */
+        --bg-primary: 15 23 42;
+        /* slate-900 */
+        --bg-secondary: 30 41 59;
+        /* slate-800 */
+        --text-primary: 248 250 252;
+        /* slate-50 */
+        --text-secondary: 148 163 184;
+        /* slate-400 */
+        --border-color: 51 65 85;
+        /* slate-700 */
+        --accent-color: 96 165 250;
+        /* blue-400 */
+    }
+
+    body {
+        @apply bg-[rgb(var(--bg-primary))] text-[rgb(var(--text-primary))] transition-colors duration-300;
+    }
+}

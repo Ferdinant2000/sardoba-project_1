@@ -21,43 +21,79 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setStatus('loading');
     try {
       const searchId = Number(telegramUser.id);
+      const fullName = `${telegramUser.first_name} ${telegramUser.last_name || ''}`.trim();
 
-      // Check DB
-      const { data: userData, error } = await supabase
+      console.log("Syncing User:", searchId);
+
+      // UPSERT User Data (Insert if new, Update if exists)
+      const userDataPayload = {
+        telegram_id: searchId,
+        username: telegramUser.username,
+        name: fullName,
+        avatar_url: telegramUser.photo_url,
+        // We do NOT overwrite 'role' if it exists. 
+        // Supabase upsert needs to know to ignore 'role' if updating, or we handle it carefully.
+        // Actually, if we just exclude 'role' from the payload, it won't be updated if the row exists?
+        // No, upsert replaces the row or updates specified columns.
+        // Better strategy: Use on_conflict to update only specific columns? 
+        // Standard supabase upsert updates all columns provided.
+        // If we want to preserve 'role', we might need to fetch first OR use a stored procedure, 
+        // OR rely on the fact that we can default role in DB and only send it for new users?
+        // But if we send {role: 'user'} in upsert, it will overwrite an 'admin' role to 'user'.
+        // So we MUST fetch first to check role, OR just update name/avatar/username.
+      };
+
+      // To fix the "Frozen Profile" bug while preserving roles:
+      // 1. Try to SELECT the user first to get their current role.
+      // 2. Then UPSERT with the correct role (existing or default).
+
+      const { data: existingUser, error: fetchError } = await supabase
         .from('users')
-        .select('*')
+        .select('role')
         .eq('telegram_id', searchId)
         .maybeSingle();
 
-      if (error) throw error;
-
-      if (!userData) {
-        setErrorMessage(`ID ${searchId} not authorized.`);
-        setStatus('error');
-        return;
+      if (fetchError) {
+        console.warn("Fetch error during sync, proceeding with default role:", fetchError);
       }
 
-      // Sync Profile
-      await supabase.from('users').update({
-        name: telegramUser.first_name,
-        username: telegramUser.username,
-        avatar_url: telegramUser.photo_url
-      }).eq('id', userData.id);
+      const roleToUse = existingUser?.role || 'user';
 
-      // Success
+      const finalPayload = {
+        ...userDataPayload,
+        role: roleToUse
+      };
+
+      const { data: upsertedUser, error: upsertError } = await supabase
+        .from('users')
+        .upsert(finalPayload, { onConflict: 'telegram_id' })
+        .select()
+        .single();
+
+      if (upsertError) {
+        console.error("Upsert Error:", upsertError);
+        throw new Error(`Sync Failed: ${upsertError.message}`);
+      }
+
+      if (!upsertedUser) {
+        throw new Error("Sync succeeded but returned no data.");
+      }
+
+      console.log("User Synced Successfully:", upsertedUser);
+
       const user: User = {
-        id: userData.id,
-        telegramId: userData.telegram_id,
-        name: userData.name,
-        role: userData.role as UserRole,
-        avatarUrl: userData.avatar_url,
-        username: userData.username
+        id: upsertedUser.id,
+        telegramId: upsertedUser.telegram_id,
+        name: upsertedUser.name,
+        role: upsertedUser.role as UserRole,
+        avatarUrl: upsertedUser.avatar_url,
+        username: upsertedUser.username
       };
       onLogin(user);
 
     } catch (e: any) {
-      console.error(e);
-      setErrorMessage("Connection Error. Please try again.");
+      console.error("Login Caught Error:", e);
+      setErrorMessage(e.message || JSON.stringify(e));
       setStatus('error');
     }
   };
@@ -91,8 +127,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
           <div className="bg-white p-8 rounded-2xl shadow-lg max-w-sm w-full border border-red-100">
             <ShieldAlert size={48} className="text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-slate-800 mb-2">Access Restricted</h2>
-            <p className="text-slate-500 text-sm mb-6">{errorMessage}</p>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Connection Error</h2>
+
+            {/* DEBUG ERROR BOX */}
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6 text-left">
+              <p className="text-red-800 text-xs font-mono break-words">
+                {errorMessage}
+              </p>
+            </div>
+
             <button
               onClick={() => window.location.reload()}
               className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-colors"
@@ -107,7 +150,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center">
         <Loader2 size={40} className="text-blue-600 animate-spin mb-4" />
-        <p className="text-slate-500 font-medium animate-pulse">Verifying profile...</p>
+        <p className="text-slate-500 font-medium animate-pulse">Creating your profile...</p>
       </div>
     );
   }

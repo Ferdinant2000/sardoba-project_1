@@ -1,8 +1,9 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Order, UserRole, Product, Client } from '../types';
-import { LogOut, Award, RefreshCw, Server, Users, DollarSign, Package, Shield, AlertTriangle, Briefcase, TrendingUp } from 'lucide-react';
+import { LogOut, Award, RefreshCw, Server, Users, Briefcase, TrendingUp, Phone, Save, AlertCircle, Package, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../supabaseClient';
 
 interface ProfileProps {
     user: User;
@@ -12,8 +13,70 @@ interface ProfileProps {
     onLogout: () => void;
 }
 
-const Profile: React.FC<ProfileProps> = ({ user, orders, products, clients, onLogout }) => {
+const Profile: React.FC<ProfileProps> = ({ user: initialUser, orders, products, clients, onLogout }) => {
     const navigate = useNavigate();
+    const [user, setUser] = useState<User>(initialUser);
+    const [isEditingPhone, setIsEditingPhone] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState(initialUser.phone || '');
+    const [loading, setLoading] = useState(false);
+
+    // Fetch fresh user data on mount to ensure reactivity (Fix Name Reactivity)
+    useEffect(() => {
+        const fetchUser = async () => {
+            const { data, error } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', initialUser.id)
+                .single();
+
+            if (data) {
+                // Map DB snake_case to TS camelCase if needed, but keeping it simple based on types
+                // Actually types.ts uses snake_case for telegram_id? No, types.ts says telegramId.
+                // Supabase returns keys as in DB (telegram_id). We need to map.
+                setUser({
+                    ...initialUser, // Keep props like role if not in simple fetch? No, DB is truth.
+                    name: data.name || initialUser.name || 'User', // Fallback to ensure text visibility
+                    username: data.username,
+                    avatarUrl: data.avatar_url,
+                    telegramId: data.telegram_id,
+                    phone: data.phone,
+                    role: data.role // Ensure we use latest role
+                });
+                setPhoneNumber(data.phone || '+998');
+            }
+        };
+        fetchUser();
+    }, [initialUser.id]);
+
+    const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        let val = e.target.value;
+        // Enforce +998 prefix
+        if (!val.startsWith('+998')) {
+            val = '+998';
+        }
+        setPhoneNumber(val);
+    };
+
+    const handleSavePhone = async () => {
+        if (!phoneNumber.trim() || phoneNumber === '+998') return;
+        setLoading(true);
+        try {
+            const { error } = await supabase
+                .from('users')
+                .update({ phone: phoneNumber })
+                .eq('id', user.id);
+
+            if (error) throw error;
+
+            setUser(prev => ({ ...prev, phone: phoneNumber }));
+            setIsEditingPhone(false);
+            alert("Phone number updated successfully!");
+        } catch (e: any) {
+            alert("Failed to update phone: " + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleForceRefetch = () => {
         window.location.reload();
@@ -29,25 +92,13 @@ const Profile: React.FC<ProfileProps> = ({ user, orders, products, clients, onLo
     const today = new Date().toISOString().split('T')[0];
 
     // STAFF Logic: Performance Today
-    // Filter orders where staffId matches current user ID and date matches today
     const myOrdersToday = orders.filter(
         (o) => o.staffId === user.id && o.date.startsWith(today)
     );
     const totalSalesToday = myOrdersToday.reduce((sum, o) => sum + o.totalAmount, 0);
 
     // ADMIN Logic: Business KPIs
-    // 1. Total Inventory Value (Stock * Cost)
     const inventoryValue = products.reduce((sum, p) => sum + (p.stock * p.cost), 0);
-    // 2. Total Debt (Sum of negative client balances)
-    // Assuming 'balance' represents what they owe us if negative? 
-    // Usually positive balance = credit, negative = debt, OR client has 'balance' which is debt.
-    // Let's assume standard accounting: Positive = Asset (They owe us), Negative = Liability (We owe them). 
-    // BUT the prompt says "Total Debt (Sum of negative client balances)".
-    // Wait, usually client balance > 0 means they paid upfront or have credit? Or debt? 
-    // In many simple apps, Balance = What they owe. 
-    // "Sum of negative client balances" implies if balance is < 0 it's debt? 
-    // Let's interpret strict prompt: "Sum of negative client balances". 
-    // If a client has balance -50, debt is 50.
     const totalDebt = clients
         .filter(c => c.balance < 0)
         .reduce((sum, c) => sum + Math.abs(c.balance), 0);
@@ -71,26 +122,76 @@ const Profile: React.FC<ProfileProps> = ({ user, orders, products, clients, onLo
 
                 <div className="relative z-10 text-center md:text-left flex-1 pt-2">
                     <div className="flex flex-col md:flex-row items-center gap-3 mb-2">
-                        <h1 className="text-3xl font-bold text-slate-900">{user.name}</h1>
+                        <h1 className="text-3xl font-bold text-slate-900 break-words">{user.name || 'User'}</h1>
                         <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${user.role === UserRole.DEVELOPER ? 'bg-purple-100 text-purple-700' :
-                            user.role === UserRole.ADMIN ? 'bg-blue-100 text-blue-700' :
-                                'bg-emerald-100 text-emerald-700'
+                                user.role === UserRole.ADMIN ? 'bg-blue-100 text-blue-700' :
+                                    user.role === UserRole.STAFF ? 'bg-emerald-100 text-emerald-700' :
+                                        'bg-slate-100 text-slate-600'
                             }`}>
                             {user.role}
                         </span>
                     </div>
-                    {user.username && (
-                        <p className="text-slate-500 font-medium mb-6">@{user.username}</p>
-                    )}
 
-                    <div className="flex flex-wrap justify-center md:justify-start gap-3">
-                        <button
-                            onClick={onLogout}
-                            className="flex items-center space-x-2 px-5 py-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors text-sm font-bold shadow-sm"
-                        >
-                            <LogOut size={18} />
-                            <span>Log Out</span>
-                        </button>
+                    {/* User Details Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-sm text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-200/60 inline-block min-w-[300px]">
+                        <div className="flex items-center space-x-2">
+                            <span className="font-semibold text-slate-400">ID:</span>
+                            <span className="font-mono text-slate-800">{user.telegramId}</span>
+                        </div>
+                        {user.username && (
+                            <div className="flex items-center space-x-2">
+                                <span className="font-semibold text-slate-400">Username:</span>
+                                <span className="text-blue-600 font-medium">@{user.username}</span>
+                            </div>
+                        )}
+
+                        {/* Phone Section */}
+                        <div className="col-span-1 md:col-span-2 border-t border-slate-200 pt-3 mt-1">
+                            {user.phone ? (
+                                <div className="flex items-center justify-between group">
+                                    <div className="flex items-center space-x-2">
+                                        <Phone size={16} className="text-slate-400" />
+                                        <span className="font-bold text-slate-800">{user.phone}</span>
+                                    </div>
+                                    <button onClick={() => setIsEditingPhone(!isEditingPhone)} className="text-xs text-blue-500 hover:underline opacity-0 group-hover:opacity-100 transition-opacity">Edit</button>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex items-center text-amber-600 text-xs font-bold">
+                                        <AlertCircle size={14} className="mr-1" />
+                                        Phone number not set
+                                    </div>
+                                    {!isEditingPhone && (
+                                        <button onClick={() => {
+                                            setPhoneNumber('+998');
+                                            setIsEditingPhone(true);
+                                        }} className="text-sm text-blue-600 font-bold hover:underline text-left">
+                                            + Add Phone Number
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {isEditingPhone && (
+                                <div className="mt-2 flex gap-2 animate-in slide-in-from-top-2">
+                                    <input
+                                        type="tel"
+                                        value={phoneNumber}
+                                        onChange={handlePhoneChange}
+                                        placeholder="+998..."
+                                        className="flex-1 px-3 py-1.5 text-sm border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        autoFocus
+                                    />
+                                    <button
+                                        onClick={handleSavePhone}
+                                        disabled={loading}
+                                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                    >
+                                        <Save size={16} />
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
